@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\DataRequestController;
 use App\Http\Controllers\Api\EmployeeQuestionController;
 use App\Http\Controllers\Api\MasterDataController;
+use App\Http\Controllers\Api\RemunerationQuestionController;
 use App\Http\Controllers\Api\StatusController;
 use Illuminate\Support\Facades\Route;
 
@@ -17,6 +18,9 @@ Route::post('/requests', [DataRequestController::class,'store']);
 
 // KEPEGAWAIAN
 Route::post('/kepegawaian', [EmployeeQuestionController::class,'store']);
+
+// REMUNERASI
+Route::post('/remunerasi',[RemunerationQuestionController::class,'store',]);
 
 // CEK STATUS
 Route::post('/status/requests', [StatusController::class,'requestStatus']);
