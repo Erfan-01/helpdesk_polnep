@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\ApplicationRequestController;
 use App\Http\Controllers\Api\DataRequestController;
 use App\Http\Controllers\Api\EmployeeQuestionController;
 use App\Http\Controllers\Api\MasterDataController;
@@ -25,3 +26,6 @@ Route::post('/remunerasi',[RemunerationQuestionController::class,'store',]);
 // CEK STATUS
 Route::post('/status/requests', [StatusController::class,'requestStatus']);
 Route::post('/status/kepegawaian', [StatusController::class,'employeeQuestionStatus']);
+
+// LAYANAN APLIKASI
+Route::post('/aplikasi',[ApplicationRequestController::class,'store',]);
