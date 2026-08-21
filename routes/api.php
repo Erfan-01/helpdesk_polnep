@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\WebsiteRequestController;
 use App\Http\Controllers\Api\ApplicationRequestController;
 use App\Http\Controllers\Api\DataRequestController;
 use App\Http\Controllers\Api\EmployeeQuestionController;
@@ -29,3 +30,6 @@ Route::post('/status/kepegawaian', [StatusController::class,'employeeQuestionSta
 
 // LAYANAN APLIKASI
 Route::post('/aplikasi',[ApplicationRequestController::class,'store',]);
+
+// WEBSITE
+Route::post('/website',[WebsiteRequestController::class,'store',]);
