@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\EmployeeQuestionController;
 use App\Http\Controllers\Api\MasterDataController;
 use App\Http\Controllers\Api\RemunerationQuestionController;
 use App\Http\Controllers\Api\StatusController;
+use App\Http\Controllers\Api\WifiInternetRequestController;
 use Illuminate\Support\Facades\Route;
 
 
@@ -33,3 +34,6 @@ Route::post('/aplikasi',[ApplicationRequestController::class,'store',]);
 
 // WEBSITE
 Route::post('/website',[WebsiteRequestController::class,'store',]);
+
+// WIFI / INTERNET
+Route::post('/wifi-internet',[WifiInternetRequestController::class,'store',]);
