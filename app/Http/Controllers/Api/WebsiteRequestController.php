@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Mail\TicketCreatedMail;
 use App\Models\WebsiteRequest;
 use App\Models\WebsiteRequestFile;
 use Carbon\Carbon;
@@ -10,6 +11,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
@@ -36,6 +38,12 @@ class WebsiteRequestController extends Controller
                     'max:30',
                 ],
 
+                'email' => [
+                    'required',
+                    'email:rfc',
+                    'max:150',
+                ],
+
                 'website_name' => [
                     'required',
                     'string',
@@ -44,8 +52,6 @@ class WebsiteRequestController extends Controller
 
                 'issue_type' => [
                     'required',
-                    'string',
-
                     Rule::in([
                         'lainnya',
                         'tidak_bisa_login',
@@ -65,6 +71,7 @@ class WebsiteRequestController extends Controller
                     'file',
                     'max:5120',
                     'mimes:jpg,jpeg,png,pdf,doc,docx,xls,xlsx',
+                    'extensions:jpg,jpeg,png,pdf,doc,docx,xls,xlsx',
                 ],
             ],
             [
@@ -74,8 +81,14 @@ class WebsiteRequestController extends Controller
                 'identifier_value.required' =>
                     'NIM/NIP wajib diisi',
 
+                'email.required' =>
+                    'Email wajib diisi',
+
+                'email.email' =>
+                    'Format email tidak valid',
+
                 'website_name.required' =>
-                    'Pilihan website wajib diisi',
+                    'Website wajib dipilih',
 
                 'issue_type.required' =>
                     'Jenis kendala wajib dipilih',
@@ -91,8 +104,12 @@ class WebsiteRequestController extends Controller
 
                 'support_file.mimes' =>
                     'Format file tidak diperbolehkan',
+
+                'support_file.extensions' =>
+                    'Format file tidak diperbolehkan',
             ]
         );
+
 
         if ($validator->fails()) {
             return $this->responseJson(
@@ -103,7 +120,9 @@ class WebsiteRequestController extends Controller
             );
         }
 
-        $validated = $validator->validated();
+
+        $validated =
+            $validator->validated();
 
         $status =
             'menunggu_verifikasi';
@@ -115,10 +134,13 @@ class WebsiteRequestController extends Controller
 
         DB::beginTransaction();
 
+
         try {
+
             $websiteRequest =
                 WebsiteRequest::create([
-                    'request_number' => null,
+                    'request_number' =>
+                        null,
 
                     'full_name' =>
                         trim(
@@ -127,16 +149,19 @@ class WebsiteRequestController extends Controller
 
                     'identifier_value' =>
                         trim(
-                            $validated[
-                                'identifier_value'
-                            ]
+                            $validated['identifier_value']
+                        ),
+
+                    'email' =>
+                        strtolower(
+                            trim(
+                                $validated['email']
+                            )
                         ),
 
                     'website_name' =>
                         trim(
-                            $validated[
-                                'website_name'
-                            ]
+                            $validated['website_name']
                         ),
 
                     'issue_type' =>
@@ -160,9 +185,6 @@ class WebsiteRequestController extends Controller
                         null,
                 ]);
 
-            // ===============================================
-            // NOMOR TIKET
-            // ===============================================
 
             $year =
                 Carbon::now(
@@ -171,7 +193,8 @@ class WebsiteRequestController extends Controller
 
             $runningNumber =
                 str_pad(
-                    (string) $websiteRequest->id,
+                    (string)
+                    $websiteRequest->id,
                     6,
                     '0',
                     STR_PAD_LEFT
@@ -183,26 +206,150 @@ class WebsiteRequestController extends Controller
                 . '-'
                 . $runningNumber;
 
+
             $websiteRequest->update([
                 'request_number' =>
                     $requestNumber,
             ]);
 
-            // ===============================================
-            // FILE
-            // ===============================================
 
-            $this->saveSupportFile(
-                $request,
-                $websiteRequest->id,
-                $storedPaths
-            );
+            if ($request->hasFile('support_file')) {
+
+                $file =
+                    $request->file(
+                        'support_file'
+                    );
+
+
+                if (
+                    !$file
+                    || !$file->isValid()
+                ) {
+                    throw new \RuntimeException(
+                        'Terjadi kesalahan saat upload file'
+                    );
+                }
+
+
+                $extension =
+                    strtolower(
+                        $file
+                            ->getClientOriginalExtension()
+                    );
+
+
+                $storedName =
+                    'website_'
+                    . Carbon::now(
+                        'Asia/Jakarta'
+                    )->format('Ymd_His')
+                    . '_'
+                    . bin2hex(
+                        random_bytes(5)
+                    )
+                    . '.'
+                    . $extension;
+
+
+                $path =
+                    Storage::disk('public')
+                        ->putFileAs(
+                            'uploads/website',
+                            $file,
+                            $storedName
+                        );
+
+
+                if ($path === false) {
+                    throw new \RuntimeException(
+                        'File gagal disimpan'
+                    );
+                }
+
+
+                $storedPaths[] =
+                    $path;
+
+
+                WebsiteRequestFile::create([
+                    'website_request_id' =>
+                        $websiteRequest->id,
+
+                    'original_name' =>
+                        $file
+                            ->getClientOriginalName(),
+
+                    'stored_name' =>
+                        $storedName,
+
+                    'file_path' =>
+                        $path,
+
+                    'mime_type' =>
+                        $file->getMimeType(),
+
+                    'file_size' =>
+                        $file->getSize(),
+                ]);
+            }
+
 
             DB::commit();
 
+
+            // =================================================
+            // EMAIL
+            // =================================================
+
+            $emailSent = false;
+
+            try {
+
+                Mail::to(
+                    $websiteRequest->email
+                )->send(
+                    new TicketCreatedMail(
+                        fullName:
+                            $websiteRequest->full_name,
+
+                        serviceName:
+                            'Layanan Website',
+
+                        requestNumber:
+                            $requestNumber,
+
+                        status:
+                            'Menunggu Verifikasi',
+
+                        estimatedResponse:
+                            $estimatedResponse
+                    )
+                );
+
+                $emailSent = true;
+
+            } catch (Throwable $mailException) {
+
+                Log::warning(
+                    'EMAIL TIKET WEBSITE GAGAL',
+                    [
+                        'request_number' =>
+                            $requestNumber,
+
+                        'email' =>
+                            $websiteRequest->email,
+
+                        'message' =>
+                            $mailException
+                                ->getMessage(),
+                    ]
+                );
+            }
+
+
             return $this->responseJson(
                 true,
-                'Permintaan layanan website berhasil dikirim',
+                'Permintaan website berhasil dikirim',
                 [
                     'id' =>
                         $websiteRequest->id,
@@ -235,20 +382,24 @@ class WebsiteRequestController extends Controller
                         $websiteRequest
                             ->created_at
                             ?->toIso8601String(),
+
+                    'email_sent' =>
+                        $emailSent,
                 ],
                 201
             );
 
         } catch (Throwable $e) {
+
             if (
                 DB::transactionLevel() > 0
             ) {
                 DB::rollBack();
             }
 
-            foreach (
-                $storedPaths as $path
-            ) {
+
+            foreach ($storedPaths as $path) {
+
                 if (
                     Storage::disk('public')
                         ->exists($path)
@@ -258,6 +409,7 @@ class WebsiteRequestController extends Controller
                 }
             }
 
+
             Log::error(
                 'WEBSITE REQUEST API ERROR',
                 [
@@ -266,103 +418,16 @@ class WebsiteRequestController extends Controller
                 ]
             );
 
+
             return $this->responseJson(
                 false,
-                'Permintaan layanan website gagal disimpan',
+                'Permintaan website gagal disimpan',
                 [],
                 500
             );
         }
     }
 
-    private function saveSupportFile(
-        Request $request,
-        int $requestId,
-        array &$storedPaths
-    ): void {
-
-        if (
-            !$request->hasFile(
-                'support_file'
-            )
-        ) {
-            return;
-        }
-
-        $file =
-            $request->file(
-                'support_file'
-            );
-
-        if (
-            !$file ||
-            !$file->isValid()
-        ) {
-            throw new \RuntimeException(
-                'File upload tidak valid'
-            );
-        }
-
-        $originalName =
-            $file->getClientOriginalName();
-
-        $extension =
-            strtolower(
-                $file->getClientOriginalExtension()
-            );
-
-        $storedName =
-            'website_'
-            . Carbon::now(
-                'Asia/Jakarta'
-            )->format('Ymd_His')
-            . '_'
-            . bin2hex(
-                random_bytes(5)
-            )
-            . '.'
-            . $extension;
-
-        $path =
-            Storage::disk('public')
-                ->putFileAs(
-                    'uploads/website',
-                    $file,
-                    $storedName
-                );
-
-        if ($path === false) {
-            throw new \RuntimeException(
-                'File gagal disimpan'
-            );
-        }
-
-        $storedPaths[] =
-            $path;
-
-        WebsiteRequestFile::create([
-            'request_id' =>
-                $requestId,
-
-            'original_name' =>
-                $originalName,
-
-            'stored_name' =>
-                $storedName,
-
-            'file_path' =>
-                $path,
-
-            'mime_type' =>
-                $file->getMimeType(),
-
-            'file_size' =>
-                $file->getSize(),
-
-            'created_at' =>
-                now(),
-        ]);
-    }
 
     private function responseJson(
         bool $success,

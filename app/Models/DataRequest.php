@@ -19,6 +19,7 @@ class DataRequest extends Model
         'full_name',
         'identifier_type',
         'identifier_value',
+        'email',
         'unit_id',
         'phone',
         'category_id',

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Mail\TicketCreatedMail;
 use App\Models\DataRequest;
 use App\Models\RequestCategory;
 use App\Models\RequestFile;
@@ -13,6 +14,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
@@ -97,6 +99,16 @@ class DataRequestController extends Controller
                     'max:30',
                 ],
 
+                // =============================================
+                // EMAIL
+                // =============================================
+
+                'email' => [
+                    'required',
+                    'email:rfc',
+                    'max:150',
+                ],
+
                 'unit_name' => [
                     $requesterType === 'unit_kerja'
                         ? 'required'
@@ -155,6 +167,12 @@ class DataRequestController extends Controller
 
                 'identifier_value.required' =>
                     $identifierType . ' wajib diisi',
+
+                'email.required' =>
+                    'Email wajib diisi',
+
+                'email.email' =>
+                    'Format email tidak valid',
 
                 'unit_name.required' =>
                     'Nama unit kerja wajib dipilih',
@@ -215,7 +233,20 @@ class DataRequestController extends Controller
             );
         }
 
-        $validated = $validator->validated();
+        $validated =
+            $validator->validated();
+
+
+        // =====================================================
+        // EMAIL PENERIMA
+        // =====================================================
+
+        $recipientEmail =
+            strtolower(
+                trim(
+                    $validated['email']
+                )
+            );
 
 
         // =====================================================
@@ -238,12 +269,21 @@ class DataRequestController extends Controller
             );
 
         $priorityMap = [
-            'tidak_mendesak' => 'tidak_mendesak',
-            'normal' => 'normal',
-            'mendesak' => 'mendesak',
+            'tidak_mendesak' =>
+                'tidak_mendesak',
+
+            'normal' =>
+                'normal',
+
+            'mendesak' =>
+                'mendesak',
         ];
 
-        if (!isset($priorityMap[$priorityKey])) {
+        if (
+            !isset(
+                $priorityMap[$priorityKey]
+            )
+        ) {
             return $this->responseJson(
                 false,
                 'Prioritas tidak valid',
@@ -261,7 +301,11 @@ class DataRequestController extends Controller
         // =====================================================
 
         $requestCategory =
-            trim($validated['request_category']);
+            trim(
+                $validated[
+                    'request_category'
+                ]
+            );
 
         $category =
             RequestCategory::query()
@@ -292,10 +336,17 @@ class DataRequestController extends Controller
         $unitId = null;
         $unitName = null;
 
-        if ($requesterType === 'unit_kerja') {
+        if (
+            $requesterType ===
+            'unit_kerja'
+        ) {
 
             $unitName =
-                trim($validated['unit_name']);
+                trim(
+                    $validated[
+                        'unit_name'
+                    ]
+                );
 
             $unit =
                 Unit::query()
@@ -355,13 +406,18 @@ class DataRequestController extends Controller
 
             $dataRequest =
                 DataRequest::create([
-                    'request_number' => null,
+                    'request_number' =>
+                        null,
 
                     'requester_type' =>
                         $requesterType,
 
                     'full_name' =>
-                        trim($validated['full_name']),
+                        trim(
+                            $validated[
+                                'full_name'
+                            ]
+                        ),
 
                     'identifier_type' =>
                         $identifierType,
@@ -373,11 +429,22 @@ class DataRequestController extends Controller
                             ]
                         ),
 
+                    // =========================================
+                    // SIMPAN EMAIL
+                    // =========================================
+
+                    'email' =>
+                        $recipientEmail,
+
                     'unit_id' =>
                         $unitId,
 
                     'phone' =>
-                        trim($validated['phone']),
+                        trim(
+                            $validated[
+                                'phone'
+                            ]
+                        ),
 
                     'category_id' =>
                         $category->id,
@@ -408,7 +475,7 @@ class DataRequestController extends Controller
 
 
             // =================================================
-            // BUAT NOMOR PERMINTAAN
+            // BUAT NOMOR TIKET
             // =================================================
 
             $year =
@@ -418,7 +485,8 @@ class DataRequestController extends Controller
 
             $runningNumber =
                 str_pad(
-                    (string) $dataRequest->id,
+                    (string)
+                    $dataRequest->id,
                     6,
                     '0',
                     STR_PAD_LEFT
@@ -432,7 +500,7 @@ class DataRequestController extends Controller
 
 
             // =================================================
-            // UPDATE NOMOR PERMINTAAN
+            // UPDATE NOMOR TIKET
             // =================================================
 
             $dataRequest->update([
@@ -484,10 +552,90 @@ class DataRequestController extends Controller
 
 
             // =================================================
-            // COMMIT
+            // COMMIT DATABASE
             // =================================================
 
             DB::commit();
+
+
+            // =================================================
+            // KIRIM NOMOR TIKET KE EMAIL
+            // =================================================
+
+            $emailSent = false;
+
+            try {
+
+                Mail::to(
+                    $recipientEmail
+                )->send(
+                    new TicketCreatedMail(
+                        fullName:
+                            $dataRequest
+                                ->full_name,
+
+                        serviceName:
+                            'Permintaan Data',
+
+                        requestNumber:
+                            $requestNumber,
+
+                        status:
+                            'Menunggu Verifikasi',
+
+                        estimatedResponse:
+                            $estimatedResponse
+                    )
+                );
+
+
+                $emailSent = true;
+
+
+                // =============================================
+                // LOG BERHASIL
+                // =============================================
+
+                Log::info(
+                    'EMAIL TIKET PERMINTAAN DATA BERHASIL',
+                    [
+                        'request_number' =>
+                            $requestNumber,
+
+                        'requester_type' =>
+                            $requesterType,
+
+                        'email' =>
+                            $recipientEmail,
+                    ]
+                );
+
+            } catch (
+                Throwable $mailException
+            ) {
+
+                // =============================================
+                // EMAIL GAGAL TIDAK MEMBATALKAN DATA
+                // =============================================
+
+                Log::warning(
+                    'EMAIL TIKET PERMINTAAN DATA GAGAL',
+                    [
+                        'request_number' =>
+                            $requestNumber,
+
+                        'requester_type' =>
+                            $requesterType,
+
+                        'email' =>
+                            $recipientEmail,
+
+                        'message' =>
+                            $mailException
+                                ->getMessage(),
+                    ]
+                );
+            }
 
 
             // =================================================
@@ -511,10 +659,12 @@ class DataRequestController extends Controller
                         $identifierType,
 
                     'identifier_value' =>
-                        $dataRequest->identifier_value,
+                        $dataRequest
+                            ->identifier_value,
 
                     'unit_name' =>
-                        $requesterType === 'unit_kerja'
+                        $requesterType ===
+                        'unit_kerja'
                             ? $unitName
                             : null,
 
@@ -529,6 +679,19 @@ class DataRequestController extends Controller
 
                     'estimated_response' =>
                         $estimatedResponse,
+
+                    'submitted_at' =>
+                        $dataRequest
+                            ->created_at
+                            ?->toIso8601String(),
+
+                    // =========================================
+                    // HANYA UNTUK INFORMASI FLUTTER / DEBUG
+                    // EMAIL ASLI TIDAK DIKIRIM KE SUCCESS PAGE
+                    // =========================================
+
+                    'email_sent' =>
+                        $emailSent,
                 ],
                 201
             );
@@ -539,7 +702,9 @@ class DataRequestController extends Controller
             // ROLLBACK DATABASE
             // =================================================
 
-            if (DB::transactionLevel() > 0) {
+            if (
+                DB::transactionLevel() > 0
+            ) {
                 DB::rollBack();
             }
 
@@ -548,14 +713,24 @@ class DataRequestController extends Controller
             // HAPUS FILE JIKA TRANSAKSI GAGAL
             // =================================================
 
-            foreach ($storedPaths as $path) {
+            foreach (
+                $storedPaths
+                as $path
+            ) {
 
                 if (
-                    Storage::disk('public')
-                        ->exists($path)
+                    Storage::disk(
+                        'public'
+                    )->exists(
+                        $path
+                    )
                 ) {
-                    Storage::disk('public')
-                        ->delete($path);
+
+                    Storage::disk(
+                        'public'
+                    )->delete(
+                        $path
+                    );
                 }
             }
 
@@ -569,6 +744,12 @@ class DataRequestController extends Controller
                 [
                     'message' =>
                         $e->getMessage(),
+
+                    'file' =>
+                        $e->getFile(),
+
+                    'line' =>
+                        $e->getLine(),
                 ]
             );
 
@@ -598,12 +779,20 @@ class DataRequestController extends Controller
         array &$storedPaths
     ): void {
 
-        if (!$request->hasFile($fieldName)) {
+        if (
+            !$request->hasFile(
+                $fieldName
+            )
+        ) {
             return;
         }
 
+
         $file =
-            $request->file($fieldName);
+            $request->file(
+                $fieldName
+            );
+
 
         if (
             !$file
@@ -630,7 +819,8 @@ class DataRequestController extends Controller
         // =====================================================
 
         $originalName =
-            $file->getClientOriginalName();
+            $file
+                ->getClientOriginalName();
 
 
         // =====================================================
@@ -639,7 +829,8 @@ class DataRequestController extends Controller
 
         $extension =
             strtolower(
-                $file->getClientOriginalExtension()
+                $file
+                    ->getClientOriginalExtension()
             );
 
 
@@ -652,7 +843,9 @@ class DataRequestController extends Controller
             . '_'
             . Carbon::now(
                 'Asia/Jakarta'
-            )->format('Ymd_His')
+            )->format(
+                'Ymd_His'
+            )
             . '_'
             . bin2hex(
                 random_bytes(5)
@@ -666,18 +859,22 @@ class DataRequestController extends Controller
         // =====================================================
 
         $path =
-            Storage::disk('public')
-                ->putFileAs(
-                    'uploads/' . $subFolder,
-                    $file,
-                    $storedName
-                );
+            Storage::disk(
+                'public'
+            )->putFileAs(
+                'uploads/'
+                . $subFolder,
+                $file,
+                $storedName
+            );
+
 
         if ($path === false) {
             throw new \RuntimeException(
                 'File gagal disimpan ke server'
             );
         }
+
 
         $storedPaths[] =
             $path;
@@ -713,7 +910,7 @@ class DataRequestController extends Controller
 
 
     /**
-     * Format response JSON agar sama dengan API lama.
+     * Format response JSON.
      */
     private function responseJson(
         bool $success,

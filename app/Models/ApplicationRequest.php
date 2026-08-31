@@ -17,6 +17,7 @@ class ApplicationRequest extends Model
         'request_number',
         'full_name',
         'identifier_value',
+        'email',
         'application_name',
         'issue_type',
         'description',

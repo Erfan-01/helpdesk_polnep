@@ -3,20 +3,19 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Mail\TicketCreatedMail;
 use App\Models\WifiInternetRequest;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Validator;
 use Throwable;
 
 class WifiInternetRequestController extends Controller
 {
-    /**
-     * Simpan laporan kendala Wifi / Internet.
-     */
     public function store(
         Request $request
     ): JsonResponse {
@@ -38,6 +37,12 @@ class WifiInternetRequestController extends Controller
                     'required',
                     'string',
                     'max:30',
+                ],
+
+                'email' => [
+                    'required',
+                    'email:rfc',
+                    'max:150',
                 ],
 
                 'building_name' => [
@@ -64,6 +69,12 @@ class WifiInternetRequestController extends Controller
                 'identifier_value.required' =>
                     'NIM/NIP wajib diisi',
 
+                'email.required' =>
+                    'Email wajib diisi',
+
+                'email.email' =>
+                    'Format email tidak valid',
+
                 'building_name.required' =>
                     'Nama gedung wajib dipilih',
 
@@ -76,16 +87,10 @@ class WifiInternetRequestController extends Controller
         );
 
 
-        // =====================================================
-        // VALIDASI GAGAL
-        // =====================================================
-
         if ($validator->fails()) {
             return $this->responseJson(
                 false,
-                $validator
-                    ->errors()
-                    ->first(),
+                $validator->errors()->first(),
                 [],
                 422
             );
@@ -96,10 +101,6 @@ class WifiInternetRequestController extends Controller
             $validator->validated();
 
 
-        // =====================================================
-        // DEFAULT
-        // =====================================================
-
         $status =
             'menunggu_verifikasi';
 
@@ -107,16 +108,13 @@ class WifiInternetRequestController extends Controller
             '1-2 Hari Kerja';
 
 
-        // =====================================================
-        // TRANSAKSI
-        // =====================================================
-
         DB::beginTransaction();
+
 
         try {
 
             // =================================================
-            // SIMPAN LAPORAN
+            // SIMPAN
             // =================================================
 
             $wifiRequest =
@@ -126,37 +124,34 @@ class WifiInternetRequestController extends Controller
 
                     'full_name' =>
                         trim(
-                            $validated[
-                                'full_name'
-                            ]
+                            $validated['full_name']
                         ),
 
                     'identifier_value' =>
                         trim(
-                            $validated[
-                                'identifier_value'
-                            ]
+                            $validated['identifier_value']
+                        ),
+
+                    'email' =>
+                        strtolower(
+                            trim(
+                                $validated['email']
+                            )
                         ),
 
                     'building_name' =>
                         trim(
-                            $validated[
-                                'building_name'
-                            ]
+                            $validated['building_name']
                         ),
 
                     'room_name' =>
                         trim(
-                            $validated[
-                                'room_name'
-                            ]
+                            $validated['room_name']
                         ),
 
                     'description' =>
                         trim(
-                            $validated[
-                                'description'
-                            ]
+                            $validated['description']
                         ),
 
                     'status' =>
@@ -174,9 +169,7 @@ class WifiInternetRequestController extends Controller
 
 
             // =================================================
-            // GENERATE NOMOR TIKET
-            //
-            // NET-2026-000001
+            // NOMOR TIKET
             // =================================================
 
             $year =
@@ -200,25 +193,67 @@ class WifiInternetRequestController extends Controller
                 . $runningNumber;
 
 
-            // =================================================
-            // UPDATE NOMOR TIKET
-            // =================================================
-
             $wifiRequest->update([
                 'request_number' =>
                     $requestNumber,
             ]);
 
 
-            // =================================================
-            // COMMIT
-            // =================================================
-
             DB::commit();
 
 
             // =================================================
-            // RESPONSE SUKSES
+            // KIRIM EMAIL
+            // =================================================
+
+            $emailSent = false;
+
+            try {
+
+                Mail::to(
+                    $wifiRequest->email
+                )->send(
+                    new TicketCreatedMail(
+                        fullName:
+                            $wifiRequest->full_name,
+
+                        serviceName:
+                            'Wifi / Internet',
+
+                        requestNumber:
+                            $requestNumber,
+
+                        status:
+                            'Menunggu Verifikasi',
+
+                        estimatedResponse:
+                            $estimatedResponse
+                    )
+                );
+
+                $emailSent = true;
+
+            } catch (Throwable $mailException) {
+
+                Log::warning(
+                    'EMAIL TIKET WIFI INTERNET GAGAL',
+                    [
+                        'request_number' =>
+                            $requestNumber,
+
+                        'email' =>
+                            $wifiRequest->email,
+
+                        'message' =>
+                            $mailException
+                                ->getMessage(),
+                    ]
+                );
+            }
+
+
+            // =================================================
+            // RESPONSE
             // =================================================
 
             return $this->responseJson(
@@ -232,8 +267,7 @@ class WifiInternetRequestController extends Controller
                         $requestNumber,
 
                     'full_name' =>
-                        $wifiRequest
-                            ->full_name,
+                        $wifiRequest->full_name,
 
                     'identifier_value' =>
                         $wifiRequest
@@ -261,15 +295,14 @@ class WifiInternetRequestController extends Controller
                         $wifiRequest
                             ->created_at
                             ?->toIso8601String(),
+
+                    'email_sent' =>
+                        $emailSent,
                 ],
                 201
             );
 
         } catch (Throwable $e) {
-
-            // =================================================
-            // ROLLBACK
-            // =================================================
 
             if (
                 DB::transactionLevel() > 0
@@ -277,10 +310,6 @@ class WifiInternetRequestController extends Controller
                 DB::rollBack();
             }
 
-
-            // =================================================
-            // LOG ERROR
-            // =================================================
 
             Log::error(
                 'WIFI INTERNET API ERROR',
@@ -290,10 +319,6 @@ class WifiInternetRequestController extends Controller
                 ]
             );
 
-
-            // =================================================
-            // RESPONSE ERROR
-            // =================================================
 
             return $this->responseJson(
                 false,
@@ -305,9 +330,6 @@ class WifiInternetRequestController extends Controller
     }
 
 
-    /**
-     * Format response JSON.
-     */
     private function responseJson(
         bool $success,
         string $message,

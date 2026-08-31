@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Mail\TicketCreatedMail;
 use App\Models\ApplicationRequest;
 use App\Models\ApplicationRequestFile;
 use Carbon\Carbon;
@@ -10,6 +11,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
@@ -17,9 +19,6 @@ use Throwable;
 
 class ApplicationRequestController extends Controller
 {
-    /**
-     * Simpan permintaan layanan aplikasi.
-     */
     public function store(
         Request $request
     ): JsonResponse {
@@ -28,100 +27,97 @@ class ApplicationRequestController extends Controller
         // VALIDASI
         // =====================================================
 
-        $validator =
-            Validator::make(
-                $request->all(),
-                [
-                    'full_name' => [
-                        'required',
-                        'string',
-                        'max:150',
-                    ],
-
-                    'identifier_value' => [
-                        'required',
-                        'string',
-                        'max:30',
-                    ],
-
-                    'application_name' => [
-                        'required',
-                        'string',
-                        'max:150',
-                    ],
-
-                    'issue_type' => [
-                        'required',
-                        'string',
-
-                        Rule::in([
-                            'tidak_bisa_login',
-                            'data_tidak_sesuai',
-                            'error_sistem',
-                            'permintaan_akses',
-                        ]),
-                    ],
-
-                    'description' => [
-                        'required',
-                        'string',
-                    ],
-
-                    'support_file' => [
-                        'nullable',
-                        'file',
-                        'max:5120',
-                        'mimes:jpg,jpeg,png,pdf,doc,docx,xls,xlsx',
-                        'extensions:jpg,jpeg,png,pdf,doc,docx,xls,xlsx',
-                    ],
+        $validator = Validator::make(
+            $request->all(),
+            [
+                'full_name' => [
+                    'required',
+                    'string',
+                    'max:150',
                 ],
-                [
-                    'full_name.required' =>
-                        'Nama lengkap wajib diisi',
 
-                    'identifier_value.required' =>
-                        'NIM/NIP wajib diisi',
+                'identifier_value' => [
+                    'required',
+                    'string',
+                    'max:30',
+                ],
 
-                    'application_name.required' =>
-                        'Pilihan aplikasi wajib diisi',
+                'email' => [
+                    'required',
+                    'email:rfc',
+                    'max:150',
+                ],
 
-                    'issue_type.required' =>
-                        'Jenis kendala wajib dipilih',
+                'application_name' => [
+                    'required',
+                    'string',
+                    'max:150',
+                ],
 
-                    'issue_type.in' =>
-                        'Jenis kendala tidak valid',
+                'issue_type' => [
+                    'required',
+                    Rule::in([
+                        'tidak_bisa_login',
+                        'data_tidak_sesuai',
+                        'error_sistem',
+                        'permintaan_akses',
+                    ]),
+                ],
 
-                    'description.required' =>
-                        'Deskripsi permasalahan wajib diisi',
+                'description' => [
+                    'required',
+                    'string',
+                ],
 
-                    'support_file.file' =>
-                        'Terjadi kesalahan saat upload file',
+                'support_file' => [
+                    'nullable',
+                    'file',
+                    'max:5120',
+                    'mimes:jpg,jpeg,png,pdf,doc,docx,xls,xlsx',
+                    'extensions:jpg,jpeg,png,pdf,doc,docx,xls,xlsx',
+                ],
+            ],
+            [
+                'full_name.required' =>
+                    'Nama lengkap wajib diisi',
 
-                    'support_file.uploaded' =>
-                        'Terjadi kesalahan saat upload file',
+                'identifier_value.required' =>
+                    'NIM/NIP wajib diisi',
 
-                    'support_file.max' =>
-                        'Ukuran file maksimal 5 MB',
+                'email.required' =>
+                    'Email wajib diisi',
 
-                    'support_file.mimes' =>
-                        'Format file tidak diperbolehkan',
+                'email.email' =>
+                    'Format email tidak valid',
 
-                    'support_file.extensions' =>
-                        'Format file tidak diperbolehkan',
-                ]
-            );
+                'application_name.required' =>
+                    'Aplikasi wajib dipilih',
 
+                'issue_type.required' =>
+                    'Jenis kendala wajib dipilih',
 
-        // =====================================================
-        // VALIDASI GAGAL
-        // =====================================================
+                'issue_type.in' =>
+                    'Jenis kendala tidak valid',
+
+                'description.required' =>
+                    'Deskripsi permasalahan wajib diisi',
+
+                'support_file.max' =>
+                    'Ukuran file maksimal 5 MB',
+
+                'support_file.mimes' =>
+                    'Format file tidak diperbolehkan',
+
+                'support_file.extensions' =>
+                    'Format file tidak diperbolehkan',
+            ]
+        );
+
 
         if ($validator->fails()) {
             return $this->responseJson(
                 false,
-                $validator
-                    ->errors()
-                    ->first(),
+                $validator->errors()->first(),
                 [],
                 422
             );
@@ -131,11 +127,6 @@ class ApplicationRequestController extends Controller
         $validated =
             $validator->validated();
 
-
-        // =====================================================
-        // DEFAULT
-        // =====================================================
-
         $status =
             'menunggu_verifikasi';
 
@@ -144,17 +135,13 @@ class ApplicationRequestController extends Controller
 
         $storedPaths = [];
 
-
-        // =====================================================
-        // TRANSACTION
-        // =====================================================
-
         DB::beginTransaction();
+
 
         try {
 
             // =================================================
-            // SIMPAN DATA
+            // SIMPAN
             // =================================================
 
             $applicationRequest =
@@ -164,35 +151,32 @@ class ApplicationRequestController extends Controller
 
                     'full_name' =>
                         trim(
-                            $validated[
-                                'full_name'
-                            ]
+                            $validated['full_name']
                         ),
 
                     'identifier_value' =>
                         trim(
-                            $validated[
-                                'identifier_value'
-                            ]
+                            $validated['identifier_value']
+                        ),
+
+                    'email' =>
+                        strtolower(
+                            trim(
+                                $validated['email']
+                            )
                         ),
 
                     'application_name' =>
                         trim(
-                            $validated[
-                                'application_name'
-                            ]
+                            $validated['application_name']
                         ),
 
                     'issue_type' =>
-                        $validated[
-                            'issue_type'
-                        ],
+                        $validated['issue_type'],
 
                     'description' =>
                         trim(
-                            $validated[
-                                'description'
-                            ]
+                            $validated['description']
                         ),
 
                     'status' =>
@@ -210,7 +194,7 @@ class ApplicationRequestController extends Controller
 
 
             // =================================================
-            // NOMOR PERMINTAAN
+            // NOMOR TIKET
             // =================================================
 
             $year =
@@ -234,10 +218,6 @@ class ApplicationRequestController extends Controller
                 . $runningNumber;
 
 
-            // =================================================
-            // UPDATE NOMOR
-            // =================================================
-
             $applicationRequest->update([
                 'request_number' =>
                     $requestNumber,
@@ -248,27 +228,141 @@ class ApplicationRequestController extends Controller
             // FILE
             // =================================================
 
-            $this->saveSupportFile(
-                $request,
-                $applicationRequest->id,
-                $storedPaths
-            );
+            if ($request->hasFile('support_file')) {
+
+                $file =
+                    $request->file(
+                        'support_file'
+                    );
+
+                if (
+                    !$file
+                    || !$file->isValid()
+                ) {
+                    throw new \RuntimeException(
+                        'Terjadi kesalahan saat upload file'
+                    );
+                }
 
 
-            // =================================================
-            // COMMIT
-            // =================================================
+                $extension =
+                    strtolower(
+                        $file
+                            ->getClientOriginalExtension()
+                    );
+
+                $storedName =
+                    'aplikasi_'
+                    . Carbon::now(
+                        'Asia/Jakarta'
+                    )->format('Ymd_His')
+                    . '_'
+                    . bin2hex(
+                        random_bytes(5)
+                    )
+                    . '.'
+                    . $extension;
+
+
+                $path =
+                    Storage::disk('public')
+                        ->putFileAs(
+                            'uploads/aplikasi',
+                            $file,
+                            $storedName
+                        );
+
+
+                if ($path === false) {
+                    throw new \RuntimeException(
+                        'File gagal disimpan'
+                    );
+                }
+
+
+                $storedPaths[] =
+                    $path;
+
+
+                ApplicationRequestFile::create([
+                    'application_request_id' =>
+                        $applicationRequest->id,
+
+                    'original_name' =>
+                        $file
+                            ->getClientOriginalName(),
+
+                    'stored_name' =>
+                        $storedName,
+
+                    'file_path' =>
+                        $path,
+
+                    'mime_type' =>
+                        $file->getMimeType(),
+
+                    'file_size' =>
+                        $file->getSize(),
+                ]);
+            }
+
 
             DB::commit();
 
 
             // =================================================
-            // RESPONSE BERHASIL
+            // EMAIL
             // =================================================
+
+            $emailSent = false;
+
+            try {
+
+                Mail::to(
+                    $applicationRequest->email
+                )->send(
+                    new TicketCreatedMail(
+                        fullName:
+                            $applicationRequest->full_name,
+
+                        serviceName:
+                            'Layanan Aplikasi',
+
+                        requestNumber:
+                            $requestNumber,
+
+                        status:
+                            'Menunggu Verifikasi',
+
+                        estimatedResponse:
+                            $estimatedResponse
+                    )
+                );
+
+                $emailSent = true;
+
+            } catch (Throwable $mailException) {
+
+                Log::warning(
+                    'EMAIL TIKET APLIKASI GAGAL',
+                    [
+                        'request_number' =>
+                            $requestNumber,
+
+                        'email' =>
+                            $applicationRequest->email,
+
+                        'message' =>
+                            $mailException
+                                ->getMessage(),
+                    ]
+                );
+            }
+
 
             return $this->responseJson(
                 true,
-                'Permintaan layanan aplikasi berhasil dikirim',
+                'Permintaan aplikasi berhasil dikirim',
                 [
                     'id' =>
                         $applicationRequest->id,
@@ -296,15 +390,19 @@ class ApplicationRequestController extends Controller
 
                     'estimated_response' =>
                         $estimatedResponse,
+
+                    'submitted_at' =>
+                        $applicationRequest
+                            ->created_at
+                            ?->toIso8601String(),
+
+                    'email_sent' =>
+                        $emailSent,
                 ],
                 201
             );
 
         } catch (Throwable $e) {
-
-            // =================================================
-            // ROLLBACK
-            // =================================================
 
             if (
                 DB::transactionLevel() > 0
@@ -313,13 +411,8 @@ class ApplicationRequestController extends Controller
             }
 
 
-            // =================================================
-            // HAPUS FILE YANG SUDAH TERSIMPAN
-            // =================================================
+            foreach ($storedPaths as $path) {
 
-            foreach (
-                $storedPaths as $path
-            ) {
                 if (
                     Storage::disk('public')
                         ->exists($path)
@@ -330,10 +423,6 @@ class ApplicationRequestController extends Controller
             }
 
 
-            // =================================================
-            // LOG
-            // =================================================
-
             Log::error(
                 'APPLICATION REQUEST API ERROR',
                 [
@@ -343,13 +432,9 @@ class ApplicationRequestController extends Controller
             );
 
 
-            // =================================================
-            // RESPONSE ERROR
-            // =================================================
-
             return $this->responseJson(
                 false,
-                'Permintaan layanan aplikasi gagal disimpan',
+                'Permintaan aplikasi gagal disimpan',
                 [],
                 500
             );
@@ -357,135 +442,6 @@ class ApplicationRequestController extends Controller
     }
 
 
-    /**
-     * Simpan file pendukung.
-     */
-    private function saveSupportFile(
-        Request $request,
-        int $requestId,
-        array &$storedPaths
-    ): void {
-
-        if (
-            !$request->hasFile(
-                'support_file'
-            )
-        ) {
-            return;
-        }
-
-
-        $file =
-            $request->file(
-                'support_file'
-            );
-
-
-        if (
-            !$file ||
-            !$file->isValid()
-        ) {
-            throw new \RuntimeException(
-                'Terjadi kesalahan saat upload file'
-            );
-        }
-
-
-        // =====================================================
-        // NAMA FILE ASLI
-        // =====================================================
-
-        $originalName =
-            $file
-                ->getClientOriginalName();
-
-
-        // =====================================================
-        // EXTENSION
-        // =====================================================
-
-        $extension =
-            strtolower(
-                $file
-                    ->getClientOriginalExtension()
-            );
-
-
-        // =====================================================
-        // NAMA FILE SERVER
-        // =====================================================
-
-        $storedName =
-            'aplikasi_'
-            . Carbon::now(
-                'Asia/Jakarta'
-            )->format(
-                'Ymd_His'
-            )
-            . '_'
-            . bin2hex(
-                random_bytes(5)
-            )
-            . '.'
-            . $extension;
-
-
-        // =====================================================
-        // STORAGE
-        // =====================================================
-
-        $path =
-            Storage::disk('public')
-                ->putFileAs(
-                    'uploads/aplikasi',
-                    $file,
-                    $storedName
-                );
-
-
-        if ($path === false) {
-            throw new \RuntimeException(
-                'File gagal disimpan'
-            );
-        }
-
-
-        $storedPaths[] =
-            $path;
-
-
-        // =====================================================
-        // DATABASE FILE
-        // =====================================================
-
-        ApplicationRequestFile::create([
-            'request_id' =>
-                $requestId,
-
-            'original_name' =>
-                $originalName,
-
-            'stored_name' =>
-                $storedName,
-
-            'file_path' =>
-                $path,
-
-            'mime_type' =>
-                $file->getMimeType(),
-
-            'file_size' =>
-                $file->getSize(),
-
-            'created_at' =>
-                now(),
-        ]);
-    }
-
-
-    /**
-     * Response JSON.
-     */
     private function responseJson(
         bool $success,
         string $message,

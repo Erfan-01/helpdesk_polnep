@@ -16,6 +16,7 @@ class WebsiteRequest extends Model
         'request_number',
         'full_name',
         'identifier_value',
+        'email',
         'website_name',
         'issue_type',
         'description',

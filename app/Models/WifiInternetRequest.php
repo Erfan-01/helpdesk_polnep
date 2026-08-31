@@ -16,6 +16,7 @@ class WifiInternetRequest extends Model
         'request_number',
         'full_name',
         'identifier_value',
+        'email',
         'building_name',
         'room_name',
         'description',
