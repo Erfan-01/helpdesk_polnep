@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\MasterDataController;
 use App\Http\Controllers\Api\RemunerationQuestionController;
 use App\Http\Controllers\Api\StatusController;
 use App\Http\Controllers\Api\WifiInternetRequestController;
+use App\Http\Controllers\Api\FacilityRequestController;
 use Illuminate\Support\Facades\Route;
 
 
@@ -37,3 +38,6 @@ Route::post('/website',[WebsiteRequestController::class,'store',]);
 
 // WIFI / INTERNET
 Route::post('/wifi-internet',[WifiInternetRequestController::class,'store',]);
+
+// FASILITAS RUANGAN
+Route::post('/fasilitas-ruangan',[FacilityRequestController::class,'store',]);
